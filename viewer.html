@@ -323,6 +323,9 @@
             // Store visible features
             var visibleFeatures = [];
             
+            // Create an icon cache to improve performance
+            var iconCache = {};
+            
             // Vector tile sources
             var poiSource = new ol.source.VectorTile({
                 format: new ol.format.MVT(),
@@ -339,19 +342,39 @@
                 url: 'http://localhost:8080/maps/livereports/live_report_entry_points/{z}/{x}/{y}.pbf'
             });
             
+            // Function to create a marker style with the given URL
+            function createMarkerStyle(markerUrl, scale) {
+                // Use a default scale if not provided
+                scale = scale || 0.5;
+                
+                // Use cached style if available
+                var cacheKey = markerUrl + '_' + scale;
+                if (iconCache[cacheKey]) {
+                    return iconCache[cacheKey];
+                }
+                
+                // Create a new style for this URL
+                var style = new ol.style.Style({
+                    image: new ol.style.Icon({
+                        src: markerUrl,
+                        scale: scale,
+                        anchor: [0.5, 0.5],
+                        anchorXUnits: 'fraction',
+                        anchorYUnits: 'fraction',
+                        crossOrigin: 'anonymous'
+                    })
+                });
+                
+                // Cache the style
+                iconCache[cacheKey] = style;
+                return style;
+            }
+            
             // Styles
             var poiStyle = function(feature) {
                 var markerUrl = feature.get('marker_url');
                 if (markerUrl) {
-                    return new ol.style.Style({
-                        image: new ol.style.Icon({
-                            src: markerUrl,
-                            scale: 0.5,
-                            anchor: [0.5, 0.5],
-                            anchorXUnits: 'fraction',
-                            anchorYUnits: 'fraction'
-                        })
-                    });
+                    return createMarkerStyle(markerUrl, 0.5);
                 } else {
                     return new ol.style.Style({
                         image: new ol.style.Circle({
@@ -376,18 +399,26 @@
                 })
             });
             
-            var entryPointStyle = new ol.style.Style({
-                image: new ol.style.Circle({
-                    radius: 4,
-                    fill: new ol.style.Fill({
-                        color: '#34A853'
-                    }),
-                    stroke: new ol.style.Stroke({
-                        color: '#ffffff',
-                        width: 2
-                    })
-                })
-            });
+            // Updated entry point style function to use marker_url if available
+            var entryPointStyle = function(feature) {
+                var markerUrl = feature.get('marker_url');
+                if (markerUrl) {
+                    return createMarkerStyle(markerUrl, 0.4); // Slightly smaller than POIs
+                } else {
+                    return new ol.style.Style({
+                        image: new ol.style.Circle({
+                            radius: 4,
+                            fill: new ol.style.Fill({
+                                color: '#34A853'
+                            }),
+                            stroke: new ol.style.Stroke({
+                                color: '#ffffff',
+                                width: 2
+                            })
+                        })
+                    });
+                }
+            };
             
             // Create layers
             var osmLayer = new ol.layer.Tile({
@@ -406,7 +437,7 @@
             
             var entryPointsLayer = new ol.layer.VectorTile({
                 source: entryPointsSource,
-                style: entryPointStyle
+                style: entryPointStyle  // Using our updated style function
             });
             
             // Create the map
@@ -414,7 +445,7 @@
                 target: 'map',
                 layers: [osmLayer, poiLayer, roadClosureLayer, entryPointsLayer],
                 view: new ol.View({
-                    center: ol.proj.fromLonLat([-73.98, 40.76]), // NYC
+                    center: ol.proj.fromLonLat([106.675327, 10.7590847]), // Ho Chi Minh City
                     zoom: 14
                 })
             });
