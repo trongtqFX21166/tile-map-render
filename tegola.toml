@@ -1,0 +1,122 @@
+[webserver]
+port = ":8080"
+hostname = "0.0.0.0"
+
+[cache]
+type = "file"
+basepath = "/tmp/tegola-cache"
+
+[[providers]]
+name = "postgis_provider"
+type = "postgis"
+uri = "postgres://postgres:postgres@postgis:5432/spatial_db?sslmode=disable"
+srid = 4326
+max_connections = 10
+
+  # New layers for live reports
+  [[providers.layers]]
+  name = "live_report_poi"
+  geometry_fieldname = "geom"
+  id_fieldname = "id"
+  sql = """
+    SELECT 
+      id, 
+      live_report_id, 
+      category_name, 
+      marker_url, 
+      status,
+      created_at,
+      number_of_view,
+      number_of_confirm,
+      'poi' as feature_type,
+      ST_AsBinary(geom) AS geom 
+    FROM 
+      public.tegola_live_report_poi 
+    WHERE 
+      geom && !BBOX! 
+      AND geom IS NOT NULL
+      AND geom_type = 'POINT'
+      AND status = 'ACTIVE'
+  """
+
+  [[providers.layers]]
+  name = "live_report_road_closure"
+  geometry_fieldname = "geom"
+  id_fieldname = "id"
+  sql = """
+    SELECT 
+      id, 
+      live_report_id, 
+      category_name, 
+      marker_url, 
+      status,
+      created_at,
+      number_of_view,
+      number_of_confirm,
+      'road_closure' as feature_type,
+      ST_AsBinary(No_Entry_Roads) AS geom 
+    FROM 
+      public.tegola_live_report_poi 
+    WHERE 
+      No_Entry_Roads && !BBOX! 
+      AND No_Entry_Roads IS NOT NULL
+      AND status = 'ACTIVE'
+  """
+
+  [[providers.layers]]
+  name = "live_report_entry_points"
+  geometry_fieldname = "geom"
+  id_fieldname = "id"
+  sql = """
+    SELECT 
+      id, 
+      live_report_id, 
+      category_name, 
+      marker_url, 
+      status,
+      created_at,
+      number_of_view,
+      number_of_confirm,
+      'entry_points' as feature_type,
+      ST_AsBinary(No_Entry_Points) AS geom 
+    FROM 
+      public.tegola_live_report_poi 
+    WHERE 
+      No_Entry_Points && !BBOX! 
+      AND No_Entry_Points IS NOT NULL
+      AND status = 'ACTIVE'
+  """
+
+
+[[maps]]
+name = "livereports"
+attribution = "© Live Reports"
+bounds = [-180.0, -85.0511, 180.0, 85.0511]
+center = [106.675327, 10.7590847, 14.0]  # Ho Chi Minh City
+
+  [[maps.layers]]
+  name = "live_report_poi"
+  provider_layer = "postgis_provider.live_report_poi"
+  min_zoom = 10
+  max_zoom = 22
+  
+    [maps.layers.default_tags]
+    class = "live_poi"
+
+  [[maps.layers]]
+  name = "live_report_road_closure"
+  provider_layer = "postgis_provider.live_report_road_closure"
+  min_zoom = 10
+  max_zoom = 22
+  
+    [maps.layers.default_tags]
+    class = "road_closure"
+
+  [[maps.layers]]
+  name = "live_report_entry_points"
+  provider_layer = "postgis_provider.live_report_entry_points"
+  min_zoom = 10
+  max_zoom = 22
+  
+    [maps.layers.default_tags]
+    class = "entry_points"

@@ -1,0 +1,861 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tegola Live Reports Viewer</title>
+    <!-- Load OpenLayers with defer attribute to ensure it loads properly -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@7.4.0/ol.css">
+    <script src="https://cdn.jsdelivr.net/npm/ol@7.4.0/dist/ol.js"></script>
+    <style>
+        body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
+        #map { position: absolute; top: 0; bottom: 0; width: 100%; height: 100%; }
+        
+        /* Control panel */
+        .map-control {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 10px;
+            border-radius: 3px;
+            z-index: 1;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+            max-width: 300px;
+        }
+        
+        /* Data panel */
+        #data-panel {
+            position: absolute;
+            left: 10px;
+            top: 10px;
+            bottom: 10px;
+            width: 350px;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px;
+            border-radius: 4px;
+            z-index: 1;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+            overflow-y: auto;
+            transform: translateX(-380px);
+            transition: transform 0.3s ease;
+            overscroll-behavior: contain;
+        }
+        
+        #data-panel.visible {
+            transform: translateX(0);
+        }
+        
+        #show-data-btn {
+            position: absolute;
+            left: 20px;
+            bottom: 20px;
+            padding: 10px 15px;
+            background: #4285F4;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            z-index: 1;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+        }
+        
+        #show-data-btn:hover {
+            background: #3367D6;
+        }
+        
+        #close-panel {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            cursor: pointer;
+            font-size: 20px;
+            color: #555;
+        }
+        
+        .item-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        
+        .item-table th, .item-table td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+            font-size: 13px;
+        }
+        
+        .item-table th {
+            background-color: #f2f2f2;
+            position: sticky;
+            top: 0;
+        }
+        
+        .item-row:hover {
+            background-color: #f5f5f5;
+            cursor: pointer;
+        }
+        
+        .item-row.selected {
+            background-color: #e3f2fd;
+        }
+        
+        .marker-img {
+            max-width: 32px;
+            max-height: 32px;
+            vertical-align: middle;
+        }
+        
+        .count-badge {
+            display: inline-block;
+            background: #4285F4;
+            color: white;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            text-align: center;
+            line-height: 24px;
+            margin-left: 10px;
+        }
+        
+        .highlight-marker {
+            position: absolute;
+            width: 30px;
+            height: 30px;
+            border: 3px solid red;
+            border-radius: 50%;
+            transform: translate(-15px, -15px);
+            pointer-events: none;
+            z-index: 10;
+            display: none;
+        }
+        
+        .highlight-line {
+            position: absolute;
+            border: 3px solid red;
+            pointer-events: none;
+            z-index: 10;
+            display: none;
+        }
+
+        .loading {
+            display: inline-block;
+            margin-left: 10px;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(0,0,0,0.1);
+            border-radius: 50%;
+            border-top-color: #4285F4;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .feature-detail {
+            background-color: #f9f9f9;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 10px;
+            border: 1px solid #ddd;
+        }
+
+        .detail-row {
+            display: flex;
+            margin-bottom: 5px;
+            align-items: center;
+        }
+
+        .detail-label {
+            font-weight: bold;
+            width: 120px;
+            flex-shrink: 0;
+        }
+
+        .detail-value {
+            flex-grow: 1;
+            word-break: break-all;
+        }
+        
+        .feature-type-badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            color: white;
+            margin-right: 8px;
+        }
+        
+        .feature-type-badge.poi {
+            background-color: #4285F4;
+        }
+        
+        .feature-type-badge.road-closure {
+            background-color: #EA4335;
+        }
+        
+        .feature-type-badge.entry-point {
+            background-color: #34A853;
+        }
+        
+        .layer-toggle {
+            margin-bottom: 10px;
+        }
+        
+        .layer-toggle label {
+            display: flex;
+            align-items: center;
+            margin-bottom: 5px;
+            cursor: pointer;
+        }
+        
+        .layer-toggle span {
+            margin-left: 5px;
+        }
+        
+        .layer-legend {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            margin-right: 5px;
+            vertical-align: middle;
+        }
+        
+        .legend-poi {
+            background-color: #4285F4;
+            border-radius: 50%;
+        }
+        
+        .legend-road {
+            background-color: #EA4335;
+            height: 4px;
+            margin-top: 6px;
+        }
+        
+        .legend-point {
+            background-color: #34A853;
+            border-radius: 50%;
+        }
+        
+        .timestamp {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+        
+        @keyframes pulse {
+            0% { transform: translate(-15px, -15px) scale(1); opacity: 1; }
+            50% { transform: translate(-15px, -15px) scale(1.5); opacity: 0.5; }
+            100% { transform: translate(-15px, -15px) scale(1); opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    
+    <div class="map-control">
+        <h3>Live Reports</h3>
+        <div><strong>Zoom:</strong> <span id="zoom-level">0</span></div>
+        <div><strong>Center:</strong> <span id="center-coords">0, 0</span></div>
+        <div class="layer-toggle">
+            <strong>Layers:</strong>
+            <div>
+                <label>
+                    <input type="checkbox" id="base-layer" checked>
+                    <span>Base Map (OSM)</span>
+                </label>
+            </div>
+            <div>
+                <label>
+                    <input type="checkbox" id="poi-layer" checked>
+                    <span><span class="layer-legend legend-poi"></span> POIs</span>
+                </label>
+            </div>
+            <div>
+                <label>
+                    <input type="checkbox" id="road-closure-layer" checked>
+                    <span><span class="layer-legend legend-road"></span> Road Closures</span>
+                </label>
+            </div>
+            <div>
+                <label>
+                    <input type="checkbox" id="entry-points-layer" checked>
+                    <span><span class="layer-legend legend-point"></span> Entry Points</span>
+                </label>
+            </div>
+        </div>
+    </div>
+    
+    <button id="show-data-btn">Show Data</button>
+    
+    <div id="data-panel">
+        <span id="close-panel">&times;</span>
+        <h2>Live Reports <span class="count-badge" id="feature-count">0</span></h2>
+        <p>Click on features on the map to view details. <span id="loading-indicator" class="loading" style="display: none;"></span></p>
+        <div id="feature-detail" class="feature-detail" style="display: none;">
+            <!-- Feature details will be inserted here -->
+        </div>
+        <h3>All Features in View</h3>
+        <div id="feature-table-container"></div>
+    </div>
+    
+    <div class="highlight-marker" id="highlight-marker"></div>
+    <div class="highlight-line" id="highlight-line"></div>
+    
+    <script>
+        // Wait for the DOM to be loaded
+        document.addEventListener('DOMContentLoaded', function() {
+            // Check if OpenLayers is loaded
+            if (typeof ol === 'undefined') {
+                console.error('OpenLayers library is not loaded. Please check your connection and reload the page.');
+                alert('Error: Map library failed to load. Please check your connection and reload the page.');
+                return;
+            }
+            
+            // Initialize the map
+            initMap();
+        });
+        
+        // Main initialization function
+        function initMap() {
+            // Store visible features
+            var visibleFeatures = [];
+            
+            // Vector tile sources
+            var poiSource = new ol.source.VectorTile({
+                format: new ol.format.MVT(),
+                url: 'http://localhost:8080/maps/livereports/live_report_poi/{z}/{x}/{y}.pbf'
+            });
+            
+            var roadClosureSource = new ol.source.VectorTile({
+                format: new ol.format.MVT(),
+                url: 'http://localhost:8080/maps/livereports/live_report_road_closure/{z}/{x}/{y}.pbf'
+            });
+            
+            var entryPointsSource = new ol.source.VectorTile({
+                format: new ol.format.MVT(),
+                url: 'http://localhost:8080/maps/livereports/live_report_entry_points/{z}/{x}/{y}.pbf'
+            });
+            
+            // Styles
+            var poiStyle = function(feature) {
+                var markerUrl = feature.get('marker_url');
+                if (markerUrl) {
+                    return new ol.style.Style({
+                        image: new ol.style.Icon({
+                            src: markerUrl,
+                            scale: 0.5,
+                            anchor: [0.5, 0.5],
+                            anchorXUnits: 'fraction',
+                            anchorYUnits: 'fraction'
+                        })
+                    });
+                } else {
+                    return new ol.style.Style({
+                        image: new ol.style.Circle({
+                            radius: 6,
+                            fill: new ol.style.Fill({
+                                color: '#4285F4'
+                            }),
+                            stroke: new ol.style.Stroke({
+                                color: '#ffffff',
+                                width: 2
+                            })
+                        })
+                    });
+                }
+            };
+            
+            var roadClosureStyle = new ol.style.Style({
+                stroke: new ol.style.Stroke({
+                    color: '#EA4335',
+                    width: 4,
+                    lineDash: [10, 10]
+                })
+            });
+            
+            var entryPointStyle = new ol.style.Style({
+                image: new ol.style.Circle({
+                    radius: 4,
+                    fill: new ol.style.Fill({
+                        color: '#34A853'
+                    }),
+                    stroke: new ol.style.Stroke({
+                        color: '#ffffff',
+                        width: 2
+                    })
+                })
+            });
+            
+            // Create layers
+            var osmLayer = new ol.layer.Tile({
+                source: new ol.source.OSM()
+            });
+            
+            var poiLayer = new ol.layer.VectorTile({
+                source: poiSource,
+                style: poiStyle
+            });
+            
+            var roadClosureLayer = new ol.layer.VectorTile({
+                source: roadClosureSource,
+                style: roadClosureStyle
+            });
+            
+            var entryPointsLayer = new ol.layer.VectorTile({
+                source: entryPointsSource,
+                style: entryPointStyle
+            });
+            
+            // Create the map
+            var map = new ol.Map({
+                target: 'map',
+                layers: [osmLayer, poiLayer, roadClosureLayer, entryPointsLayer],
+                view: new ol.View({
+                    center: ol.proj.fromLonLat([-73.98, 40.76]), // NYC
+                    zoom: 14
+                })
+            });
+            
+            // Update zoom level and center coordinates display
+            map.on('moveend', function() {
+                var zoom = map.getView().getZoom().toFixed(2);
+                var center = ol.proj.toLonLat(map.getView().getCenter());
+                document.getElementById('zoom-level').textContent = zoom;
+                document.getElementById('center-coords').textContent = 
+                    center[0].toFixed(4) + ', ' + center[1].toFixed(4);
+                
+                // Collect visible features after the map moves
+                collectVisibleFeatures();
+            });
+            
+            // Layer toggle handlers
+            document.getElementById('base-layer').addEventListener('change', function(e) {
+                osmLayer.setVisible(e.target.checked);
+            });
+            
+            document.getElementById('poi-layer').addEventListener('change', function(e) {
+                poiLayer.setVisible(e.target.checked);
+                collectVisibleFeatures();
+            });
+            
+            document.getElementById('road-closure-layer').addEventListener('change', function(e) {
+                roadClosureLayer.setVisible(e.target.checked);
+                collectVisibleFeatures();
+            });
+            
+            document.getElementById('entry-points-layer').addEventListener('change', function(e) {
+                entryPointsLayer.setVisible(e.target.checked);
+                collectVisibleFeatures();
+            });
+            
+            // Set initial display values
+            var initialZoom = map.getView().getZoom().toFixed(2);
+            var initialCenter = ol.proj.toLonLat(map.getView().getCenter());
+            document.getElementById('zoom-level').textContent = initialZoom;
+            document.getElementById('center-coords').textContent = 
+                initialCenter[0].toFixed(4) + ', ' + initialCenter[1].toFixed(4);
+            
+            // Data panel toggle
+            document.getElementById('show-data-btn').addEventListener('click', function() {
+                var dataPanel = document.getElementById('data-panel');
+                dataPanel.classList.add('visible');
+                collectVisibleFeatures();
+            });
+            
+            // Close panel button
+            document.getElementById('close-panel').addEventListener('click', function() {
+                document.getElementById('data-panel').classList.remove('visible');
+                hideHighlights();
+            });
+            
+            // Helper function to convert Unix timestamp to human-readable format
+            function formatTimestamp(timestamp) {
+                if (!timestamp) return 'N/A';
+                // Convert from milliseconds to seconds if necessary
+                if (timestamp > 1000000000000) {
+                    timestamp = Math.floor(timestamp / 1000);
+                }
+                var date = new Date(timestamp * 1000);
+                return date.toLocaleString();
+            }
+            
+            // Function to safely extract coordinates from a feature
+            function getFeatureCoordinates(feature) {
+                if (!feature || !feature.getGeometry()) {
+                    return null;
+                }
+                
+                var geometry = feature.getGeometry();
+                var coordinates = null;
+                
+                try {
+                    // For Point geometries
+                    if (geometry.getType() === 'Point') {
+                        coordinates = geometry.getCoordinates();
+                        return ol.proj.toLonLat(coordinates);
+                    }
+                    
+                    // For LineString geometries, return the center of the extent
+                    if (geometry.getType() === 'LineString' || geometry.getType() === 'MultiLineString') {
+                        var extent = geometry.getExtent();
+                        coordinates = ol.extent.getCenter(extent);
+                        return ol.proj.toLonLat(coordinates);
+                    }
+                    
+                    // For other geometry types, try to get a representative point
+                    if (typeof geometry.getExtent === 'function') {
+                        var extent = geometry.getExtent();
+                        coordinates = ol.extent.getCenter(extent);
+                        return ol.proj.toLonLat(coordinates);
+                    }
+                } catch (e) {
+                    console.warn('Error getting coordinates from feature:', e);
+                }
+                
+                return null;
+            }
+            
+            // Function to collect visible features
+            function collectVisibleFeatures() {
+                // Show loading indicator
+                document.getElementById('loading-indicator').style.display = 'inline-block';
+                
+                // Clear previous features
+                visibleFeatures = [];
+                
+                // Use a timeout to allow the tiles to load
+                setTimeout(function() {
+                    // Sample points across the viewport to find features
+                    var viewportWidth = map.getSize()[0];
+                    var viewportHeight = map.getSize()[1];
+                    
+                    var step = 50; // pixels between sample points
+                    for (var x = 0; x < viewportWidth; x += step) {
+                        for (var y = 0; y < viewportHeight; y += step) {
+                            var pixel = [x, y];
+                            
+                            map.forEachFeatureAtPixel(pixel, function(feature, layer) {
+                                // Check which layer the feature belongs to
+                                var featureType = '';
+                                if (layer === poiLayer) {
+                                    featureType = 'poi';
+                                } else if (layer === roadClosureLayer) {
+                                    featureType = 'road_closure';
+                                } else if (layer === entryPointsLayer) {
+                                    featureType = 'entry_points';
+                                } else {
+                                    return; // Skip features from other layers
+                                }
+                                
+                                // Set the feature type if not already set
+                                if (!feature.get('feature_type')) {
+                                    feature.set('feature_type', featureType);
+                                }
+                                
+                                // Check if we already have this feature
+                                var isDuplicate = visibleFeatures.some(function(f) {
+                                    return f.get('id') === feature.get('id') && 
+                                           f.get('feature_type') === feature.get('feature_type');
+                                });
+                                
+                                if (!isDuplicate) {
+                                    visibleFeatures.push(feature);
+                                }
+                                
+                                return feature;
+                            });
+                        }
+                    }
+                    
+                    // Update the table with discovered features
+                    updateFeatureTable();
+                    
+                    // Hide loading indicator
+                    document.getElementById('loading-indicator').style.display = 'none';
+                }, 1000); // Wait for tiles to load
+            }
+            
+            // Function to update feature table
+            function updateFeatureTable() {
+                // Update count badge
+                document.getElementById('feature-count').textContent = visibleFeatures.length;
+                
+                // Create array of feature data objects
+                var featuresData = visibleFeatures.map(function(feature) {
+                    var properties = feature.getProperties();
+                    var coordinates = getFeatureCoordinates(feature);
+                    var featureType = properties.feature_type || 'unknown';
+                    
+                    // Create object with properties we want to display
+                    var featureData = {
+                        id: properties.id,
+                        feature_type: featureType,
+                        category_name: properties.category_name || 'N/A',
+                        marker_url: properties.marker_url || '',
+                        status: properties.status || 'N/A',
+                        created_at: properties.created_at || 0,
+                        number_of_view: properties.number_of_view || 0,
+                        number_of_confirm: properties.number_of_confirm || 0,
+                        lon: coordinates ? coordinates[0].toFixed(6) : 'N/A',
+                        lat: coordinates ? coordinates[1].toFixed(6) : 'N/A',
+                        _feature: feature, // Store reference to original feature
+                        _coords: coordinates // Store original coordinates
+                    };
+                    
+                    return featureData;
+                });
+                
+                // Generate the table HTML
+                var tableHTML = '';
+                if (featuresData.length > 0) {
+                    tableHTML = '<table class="item-table">' +
+                        '<thead><tr>' +
+                        '<th>Type</th>' +
+                        '<th>Category</th>' +
+                        '<th>Marker</th>' +
+                        '<th>Status</th>' +
+                        '</tr></thead><tbody>';
+                    
+                    featuresData.forEach(function(item, index) {
+                        var typeBadge = '';
+                        if (item.feature_type === 'poi') {
+                            typeBadge = '<span class="feature-type-badge poi">POI</span>';
+                        } else if (item.feature_type === 'road_closure') {
+                            typeBadge = '<span class="feature-type-badge road-closure">Road</span>';
+                        } else if (item.feature_type === 'entry_points') {
+                            typeBadge = '<span class="feature-type-badge entry-point">Entry</span>';
+                        }
+                        
+                        tableHTML += '<tr class="item-row" data-index="' + index + '">' +
+                            '<td>' + typeBadge + '</td>' +
+                            '<td>' + item.category_name + '</td>' +
+                            '<td>';
+                        
+                        if (item.marker_url) {
+                            tableHTML += '<img src="' + item.marker_url + '" class="marker-img" crossorigin="anonymous">';
+                        } else {
+                            tableHTML += 'N/A';
+                        }
+                        
+                        tableHTML += '</td>' +
+                            '<td>' + item.status + '</td>' +
+                            '</tr>';
+                    });
+                    
+                    tableHTML += '</tbody></table>';
+                } else {
+                    tableHTML = '<div><em>No features found in the current view. Try zooming in or panning to an area with live reports.</em></div>';
+                }
+                
+                // Insert the table into the DOM
+                document.getElementById('feature-table-container').innerHTML = tableHTML;
+                
+                // Add click handlers to rows
+                var rows = document.querySelectorAll('.item-row');
+                rows.forEach(function(row) {
+                    row.addEventListener('click', function() {
+                        // Remove selected class from all rows
+                        rows.forEach(function(r) {
+                            r.classList.remove('selected');
+                        });
+                        
+                        // Add selected class to clicked row
+                        this.classList.add('selected');
+                        
+                        // Get the feature data
+                        var index = parseInt(this.getAttribute('data-index'));
+                        var item = featuresData[index];
+                        
+                        // Center map on the feature
+                        if (item._coords) {
+                            map.getView().animate({
+                                center: ol.proj.fromLonLat(item._coords),
+                                duration: 500
+                            });
+                            
+                            // Show highlight based on feature type
+                            highlightFeature(item);
+                            
+                            // Show feature details
+                            showFeatureDetails(item);
+                        }
+                    });
+                });
+                
+                // Store the features data globally for other functions
+                window.currentFeaturesData = featuresData;
+            }
+            
+            // Function to show feature details
+            function showFeatureDetails(item) {
+                var detailDiv = document.getElementById('feature-detail');
+                var html = '';
+                
+                // Determine feature type display name
+                var featureTypeName = 'Unknown';
+                var featureTypeClass = '';
+                if (item.feature_type === 'poi') {
+                    featureTypeName = 'Point of Interest';
+                    featureTypeClass = 'poi';
+                } else if (item.feature_type === 'road_closure') {
+                    featureTypeName = 'Road Closure';
+                    featureTypeClass = 'road-closure';
+                } else if (item.feature_type === 'entry_points') {
+                    featureTypeName = 'Entry Points';
+                    featureTypeClass = 'entry-point';
+                }
+                
+                // Create a detail view with properties
+                html += '<h3><span class="feature-type-badge ' + featureTypeClass + '">' + featureTypeName + '</span> ' + 
+                    (item.category_name || 'Unnamed') + '</h3>';
+                
+                // Show marker if available
+                if (item.marker_url) {
+                    html += '<div class="detail-row">' +
+                        '<div class="detail-label">Marker:</div>' +
+                        '<div class="detail-value">' +
+                        '<img src="' + item.marker_url + '" class="marker-img" crossorigin="anonymous">' +
+                        '</div></div>';
+                }
+                
+                // Add timestamp
+                html += '<div class="timestamp">Created: ' + formatTimestamp(item.created_at) + '</div>';
+                
+                // Add main details
+                var detailsToShow = {
+                    'ID': item.id,
+                    'Status': item.status,
+                    'Category': item.category_name,
+                    'Views': item.number_of_view,
+                    'Confirmations': item.number_of_confirm,
+                    'Location': item.lon + ', ' + item.lat
+                };
+                
+                // Add each detail
+                for (var key in detailsToShow) {
+                    html += '<div class="detail-row">' +
+                        '<div class="detail-label">' + key + ':</div>' +
+                        '<div class="detail-value">' + detailsToShow[key] + '</div>' +
+                        '</div>';
+                }
+                
+                // Set the content and show the detail panel
+                detailDiv.innerHTML = html;
+                detailDiv.style.display = 'block';
+            }
+            
+            // Function to highlight feature based on its type
+            function highlightFeature(item) {
+                // Hide both highlight elements first
+                hideHighlights();
+                
+                if (item.feature_type === 'poi' || item.feature_type === 'entry_points') {
+                    // For points, show the circular marker
+                    highlightPoint(item._coords);
+                } else if (item.feature_type === 'road_closure') {
+                    // For lines, show the line marker (this is more complex and would need the actual geometry)
+                    // For now, we'll just highlight the center point
+                    highlightPoint(item._coords);
+                    
+                    // In a real implementation, you would get the actual line geometry
+                    // and create a highlight that follows the line shape
+                }
+            }
+            
+            // Function to highlight a point
+            function highlightPoint(coords) {
+                var marker = document.getElementById('highlight-marker');
+                var pixel = map.getPixelFromCoordinate(ol.proj.fromLonLat(coords));
+                
+                marker.style.left = pixel[0] + 'px';
+                marker.style.top = pixel[1] + 'px';
+                marker.style.display = 'block';
+                
+                // Animate the marker
+                marker.style.animation = 'none';
+                void marker.offsetWidth; // Force reflow
+                marker.style.animation = 'pulse 1.5s infinite';
+            }
+            
+            // Function to hide all highlights
+            function hideHighlights() {
+                document.getElementById('highlight-marker').style.display = 'none';
+                document.getElementById('highlight-line').style.display = 'none';
+            }
+            
+            // Handle map clicks to show feature info
+            map.on('click', function(evt) {
+                // Get the feature at the clicked pixel
+                var clickedFeature = null;
+                var clickedLayer = null;
+                
+                map.forEachFeatureAtPixel(evt.pixel, function(feature, layer) {
+                    if (layer === poiLayer || layer === roadClosureLayer || layer === entryPointsLayer) {
+                        clickedFeature = feature;
+                        clickedLayer = layer;
+                        return true; // Stop after finding the first feature
+                    }
+                });
+                
+                if (clickedFeature) {
+                    // Determine feature type based on the layer
+                    var featureType = 'unknown';
+                    if (clickedLayer === poiLayer) {
+                        featureType = 'poi';
+                    } else if (clickedLayer === roadClosureLayer) {
+                        featureType = 'road_closure';
+                    } else if (clickedLayer === entryPointsLayer) {
+                        featureType = 'entry_points';
+                    }
+                    
+                    // Make sure the feature has a type
+                    if (!clickedFeature.get('feature_type')) {
+                        clickedFeature.set('feature_type', featureType);
+                    }
+                    
+                    var properties = clickedFeature.getProperties();
+                    var coordinates = getFeatureCoordinates(clickedFeature);
+                    
+                    // Create a data object with the feature properties
+                    var featureData = {
+                        id: properties.id,
+                        feature_type: properties.feature_type || featureType,
+                        category_name: properties.category_name || 'N/A',
+                        marker_url: properties.marker_url || '',
+                        status: properties.status || 'N/A',
+                        created_at: properties.created_at || 0,
+                        number_of_view: properties.number_of_view || 0,
+                        number_of_confirm: properties.number_of_confirm || 0,
+                        lon: coordinates ? coordinates[0].toFixed(6) : 'N/A',
+                        lat: coordinates ? coordinates[1].toFixed(6) : 'N/A',
+                        _feature: clickedFeature,
+                        _coords: coordinates
+                    };
+                    
+                    // Show feature details
+                    showFeatureDetails(featureData);
+                    
+                    // Highlight the feature
+                    highlightFeature(featureData);
+                    
+                    // Open data panel if not already open
+                    if (!document.getElementById('data-panel').classList.contains('visible')) {
+                        document.getElementById('data-panel').classList.add('visible');
+                        collectVisibleFeatures();
+                    }
+                } else {
+                    // If no feature was clicked, hide the details
+                    document.getElementById('feature-detail').style.display = 'none';
+                    hideHighlights();
+                }
+            });
+            
+            // Initial collection of features
+            collectVisibleFeatures();
+        }
+    </script>
+</body>
+</html>
