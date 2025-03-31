@@ -3,16 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tegola Live Reports Viewer</title>
-    <!-- Load OpenLayers -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@7.4.0/ol.css">
+    <title>Tegola Vector Tile Viewer</title>
+    <!-- Using OpenLayers which has better CDN reliability -->
     <script src="https://cdn.jsdelivr.net/npm/ol@7.4.0/dist/ol.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@7.4.0/ol.css">
     <style>
         body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
         #map { position: absolute; top: 0; bottom: 0; width: 100%; height: 100%; }
-        
-        /* Control panel */
-        .map-control {
+        .map-overlay {
             position: absolute;
             top: 10px;
             right: 10px;
@@ -21,7 +19,6 @@
             border-radius: 3px;
             z-index: 1;
             box-shadow: 0 1px 4px rgba(0,0,0,0.2);
-            max-width: 300px;
         }
         
         /* Data panel */
@@ -73,31 +70,31 @@
             color: #555;
         }
         
-        .item-table {
+        .feature-table {
             width: 100%;
             border-collapse: collapse;
             margin-top: 10px;
         }
         
-        .item-table th, .item-table td {
+        .feature-table th, .feature-table td {
             border: 1px solid #ddd;
             padding: 8px;
             text-align: left;
             font-size: 13px;
         }
         
-        .item-table th {
+        .feature-table th {
             background-color: #f2f2f2;
             position: sticky;
             top: 0;
         }
         
-        .item-row:hover {
+        .feature-row:hover {
             background-color: #f5f5f5;
             cursor: pointer;
         }
         
-        .item-row.selected {
+        .feature-row.selected {
             background-color: #e3f2fd;
         }
         
@@ -126,14 +123,6 @@
             border: 3px solid red;
             border-radius: 50%;
             transform: translate(-15px, -15px);
-            pointer-events: none;
-            z-index: 10;
-            display: none;
-        }
-        
-        .highlight-line {
-            position: absolute;
-            border: 3px solid red;
             pointer-events: none;
             z-index: 10;
             display: none;
@@ -216,17 +205,28 @@
 <body>
     <div id="map"></div>
     
-    <div class="map-control">
-        <h3>Live Reports</h3>
+    <div class="map-overlay">
+        <h3>Tegola Vector Tiles</h3>
         <div><strong>Zoom:</strong> <span id="zoom-level">0</span></div>
         <div><strong>Center:</strong> <span id="center-coords">0, 0</span></div>
+        <div>
+            <strong>Visible Layers:</strong>
+            <div>
+                <input type="checkbox" id="live-poi-layer" checked>
+                <label for="live-poi-layer">Live POI</label>
+            </div>
+            <div>
+                <input type="checkbox" id="road-closures-layer" checked>
+                <label for="road-closures-layer">Road Closures</label>
+            </div>
+        </div>
     </div>
     
     <button id="show-data-btn">Show Data</button>
     
     <div id="data-panel">
         <span id="close-panel">&times;</span>
-        <h2>Live Reports <span class="count-badge" id="feature-count">0</span></h2>
+        <h2>Feature Data <span class="count-badge" id="feature-count">0</span></h2>
         <p>Click on features on the map to view details. <span id="loading-indicator" class="loading" style="display: none;"></span></p>
         <div id="feature-detail" class="feature-detail" style="display: none;">
             <!-- Feature details will be inserted here -->
@@ -236,65 +236,40 @@
     </div>
     
     <div class="highlight-marker" id="highlight-marker"></div>
-    <div class="highlight-line" id="highlight-line"></div>
     
     <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            if (typeof ol === 'undefined') {
-                console.error('OpenLayers library is not loaded. Please check your connection and reload the page.');
-                alert('Error: Map library failed to load. Please check your connection and reload the page.');
-                return;
-            }
-            
-            initMap();
-        });
-        
-        function initMap() {
+        // Initialize the map when window loads
+        window.addEventListener('load', function() {
             // Store visible features
             var visibleFeatures = [];
             
-            // Create an icon cache to improve performance
-            var iconCache = {};
-            
-            // Create the vector tile source for all live reports
-            var liveReportsSource = new ol.source.VectorTile({
+            // Create the vector tile sources
+            var livePoiSource = new ol.source.VectorTile({
                 format: new ol.format.MVT(),
-                url: 'http://localhost:8080/maps/livereports/live_reports/{z}/{x}/{y}.pbf'
+                url: 'https://tile.vietmap.live/dev/report/maps/livereports/live_poi/{z}/{x}/{y}.pbf',
+                attributions: '© Live Reports'
+            });
+
+            var roadClosuresSource = new ol.source.VectorTile({
+                format: new ol.format.MVT(),
+                url: 'https://tile.vietmap.live/dev/report/maps/livereports/road_closures/{z}/{x}/{y}.pbf'
             });
             
-            // Function to create a marker style with the given URL
-            function createMarkerStyle(markerUrl, scale) {
-                scale = scale || 0.5;
-                var cacheKey = markerUrl + '_' + scale;
-                
-                if (iconCache[cacheKey]) {
-                    return iconCache[cacheKey];
-                }
-                
-                var style = new ol.style.Style({
-                    image: new ol.style.Icon({
-                        src: markerUrl,
-                        scale: scale,
-                        anchor: [0.5, 0.5],
-                        anchorXUnits: 'fraction',
-                        anchorYUnits: 'fraction',
-                        crossOrigin: 'anonymous'
-                    })
-                });
-                
-                iconCache[cacheKey] = style;
-                return style;
-            }
-            
-            // Style function that applies different styles based on feature_type
-            function liveReportsStyleFunction(feature) {
-                var featureType = feature.get('feature_type');
+            // Create styles for different feature types
+            function getPoiStyle(feature) {
                 var markerUrl = feature.get('marker_url');
-                
-                if (featureType === 'poi') {
-                    if (markerUrl) {
-                        return createMarkerStyle(markerUrl, 0.5);
-                    }
+                if (markerUrl) {
+                    return new ol.style.Style({
+                        image: new ol.style.Icon({
+                            src: markerUrl,
+                            scale: 0.5,
+                            anchor: [0.5, 0.5],
+                            anchorXUnits: 'fraction',
+                            anchorYUnits: 'fraction',
+                            crossOrigin: 'anonymous'
+                        })
+                    });
+                } else {
                     return new ol.style.Style({
                         image: new ol.style.Circle({
                             radius: 6,
@@ -303,11 +278,16 @@
                             }),
                             stroke: new ol.style.Stroke({
                                 color: '#ffffff',
-                                width: 2
+                                width: 1
                             })
                         })
                     });
-                } else if (featureType === 'road_closure') {
+                }
+            }
+            
+            function getRoadClosureStyle(feature) {
+                // Check feature type - for road closure lines
+                if (feature.get('feature_type') === 'road_closure') {
                     return new ol.style.Style({
                         stroke: new ol.style.Stroke({
                             color: '#EA4335',
@@ -315,69 +295,112 @@
                             lineDash: [10, 10]
                         })
                     });
-                } else if (featureType === 'entry_point') {
+                } 
+                // For entry points
+                else if (feature.get('feature_type') === 'entry_point') {
+                    var markerUrl = feature.get('marker_url');
                     if (markerUrl) {
-                        return createMarkerStyle(markerUrl, 0.4);
+                        return new ol.style.Style({
+                            image: new ol.style.Icon({
+                                src: markerUrl,
+                                scale: 0.4,
+                                anchor: [0.5, 0.5],
+                                anchorXUnits: 'fraction',
+                                anchorYUnits: 'fraction',
+                                crossOrigin: 'anonymous'
+                            })
+                        });
+                    } else {
+                        return new ol.style.Style({
+                            image: new ol.style.Circle({
+                                radius: 4,
+                                fill: new ol.style.Fill({
+                                    color: '#34A853'
+                                }),
+                                stroke: new ol.style.Stroke({
+                                    color: '#ffffff',
+                                    width: 1
+                                })
+                            })
+                        });
                     }
+                } 
+                // Default style
+                else {
                     return new ol.style.Style({
                         image: new ol.style.Circle({
-                            radius: 4,
+                            radius: 5,
                             fill: new ol.style.Fill({
-                                color: '#34A853'
+                                color: '#FBBC05'
                             }),
                             stroke: new ol.style.Stroke({
                                 color: '#ffffff',
-                                width: 2
+                                width: 1
                             })
                         })
                     });
                 }
-                
-                // Default style if no type matched
-                return new ol.style.Style({
-                    image: new ol.style.Circle({
-                        radius: 5,
-                        fill: new ol.style.Fill({
-                            color: '#FBBC05'
-                        }),
-                        stroke: new ol.style.Stroke({
-                            color: '#ffffff',
-                            width: 1
-                        })
-                    })
-                });
             }
-            
-            // Create layers
+
+            // Create the OSM background layer
             var osmLayer = new ol.layer.Tile({
                 source: new ol.source.OSM()
             });
-            
-            var liveReportsLayer = new ol.layer.VectorTile({
-                source: liveReportsSource,
-                style: liveReportsStyleFunction,
-                declutter: true,
-                renderBuffer: 128
+
+            // Create the feature layers
+            var livePoiLayer = new ol.layer.VectorTile({
+                source: livePoiSource,
+                style: getPoiStyle,
+                minZoom: 10,
+                maxZoom: 22,
+                declutter: true
             });
-            
+
+            var roadClosuresLayer = new ol.layer.VectorTile({
+                source: roadClosuresSource,
+                style: getRoadClosureStyle,
+                minZoom: 10,
+                maxZoom: 22
+            });
+
+            // Create controls for the map
+            var controls = new ol.Collection([
+                new ol.control.Zoom(),
+                new ol.control.Attribution(),
+                new ol.control.ScaleLine()
+            ]);
+
             // Create the map
             var map = new ol.Map({
                 target: 'map',
-                layers: [osmLayer, liveReportsLayer],
+                layers: [osmLayer, livePoiLayer, roadClosuresLayer],
                 view: new ol.View({
                     center: ol.proj.fromLonLat([106.675327, 10.7590847]), // Ho Chi Minh City
                     zoom: 14
-                })
+                }),
+                controls: controls
             });
-            
+
             // Update zoom level and center coordinates display
             map.on('moveend', function() {
                 var zoom = map.getView().getZoom().toFixed(2);
                 var center = ol.proj.toLonLat(map.getView().getCenter());
                 document.getElementById('zoom-level').textContent = zoom;
                 document.getElementById('center-coords').textContent = 
-                    center[0].toFixed(4) + ', ' + center[1].toFixed(4);
+                    `${center[0].toFixed(4)}, ${center[1].toFixed(4)}`;
                 
+                // Collect visible features after the map moves
+                collectVisibleFeatures();
+            });
+
+            // Layer toggle controls
+            document.getElementById('live-poi-layer').addEventListener('change', function(e) {
+                livePoiLayer.setVisible(e.target.checked);
+                collectVisibleFeatures();
+            });
+
+            document.getElementById('road-closures-layer').addEventListener('change', function(e) {
+                roadClosuresLayer.setVisible(e.target.checked);
                 collectVisibleFeatures();
             });
             
@@ -386,19 +409,25 @@
             var initialCenter = ol.proj.toLonLat(map.getView().getCenter());
             document.getElementById('zoom-level').textContent = initialZoom;
             document.getElementById('center-coords').textContent = 
-                initialCenter[0].toFixed(4) + ', ' + initialCenter[1].toFixed(4);
+                `${initialCenter[0].toFixed(4)}, ${initialCenter[1].toFixed(4)}`;
             
-            // Data panel toggle
+            // Data panel toggle - use passive event listener
             document.getElementById('show-data-btn').addEventListener('click', function() {
-                document.getElementById('data-panel').classList.add('visible');
+                var dataPanel = document.getElementById('data-panel');
+                dataPanel.classList.add('visible');
                 collectVisibleFeatures();
-            });
+            }, { passive: true });
             
-            // Close panel button
+            // Close panel button - use passive event listener
             document.getElementById('close-panel').addEventListener('click', function() {
                 document.getElementById('data-panel').classList.remove('visible');
-                hideHighlights();
-            });
+                hideHighlightMarker();
+            }, { passive: true });
+            
+            // Add passive scroll listeners to the data panel
+            document.getElementById('data-panel').addEventListener('scroll', function() {
+                // Just a placeholder to ensure scroll events are passive
+            }, { passive: true });
             
             // Helper function to convert Unix timestamp to human-readable format
             function formatTimestamp(timestamp) {
@@ -427,8 +456,8 @@
                         return ol.proj.toLonLat(coordinates);
                     }
                     
-                    // For LineString geometries, return the center of the extent
-                    if (geometry.getType() === 'LineString' || geometry.getType() === 'MultiLineString') {
+                    // For LineString geometries
+                    if (geometry.getType() === 'LineString') {
                         var extent = geometry.getExtent();
                         coordinates = ol.extent.getCenter(extent);
                         return ol.proj.toLonLat(coordinates);
@@ -449,21 +478,27 @@
             
             // Function to collect visible features
             function collectVisibleFeatures() {
+                // Show loading indicator
                 document.getElementById('loading-indicator').style.display = 'inline-block';
+                
+                // Clear previous features
                 visibleFeatures = [];
                 
+                // Use a timeout to allow the tiles to load
                 setTimeout(function() {
+                    // Get features at pixel locations across the viewport
                     var viewportWidth = map.getSize()[0];
                     var viewportHeight = map.getSize()[1];
                     
+                    // Sample points across the viewport to find features
                     var step = 50; // pixels between sample points
                     for (var x = 0; x < viewportWidth; x += step) {
                         for (var y = 0; y < viewportHeight; y += step) {
                             var pixel = [x, y];
                             
                             map.forEachFeatureAtPixel(pixel, function(feature, layer) {
-                                if (layer === liveReportsLayer) {
-                                    // Check if we already have this feature
+                                if (layer === livePoiLayer || layer === roadClosuresLayer) {
+                                    // Check if we already have this feature (using id and feature_type)
                                     var isDuplicate = visibleFeatures.some(function(f) {
                                         return f.get('id') === feature.get('id') && 
                                                f.get('feature_type') === feature.get('feature_type');
@@ -472,16 +507,18 @@
                                     if (!isDuplicate) {
                                         visibleFeatures.push(feature);
                                     }
-                                    
                                     return feature;
                                 }
                             });
                         }
                     }
                     
+                    // Update the table with discovered features
                     updateFeatureTable();
+                    
+                    // Hide loading indicator
                     document.getElementById('loading-indicator').style.display = 'none';
-                }, 1000);
+                }, 1000); // Wait for tiles to load
             }
             
             // Function to update feature table
@@ -493,11 +530,12 @@
                 var featuresData = visibleFeatures.map(function(feature) {
                     var properties = feature.getProperties();
                     var coordinates = getFeatureCoordinates(feature);
-                    var featureType = properties.feature_type || 'unknown';
                     
+                    // Create object with properties we want to display
                     return {
                         id: properties.id,
-                        feature_type: featureType,
+                        feature_type: properties.feature_type || 'unknown',
+                        live_report_id: properties.live_report_id || 'N/A',
                         category_name: properties.category_name || 'N/A',
                         marker_url: properties.marker_url || '',
                         status: properties.status || 'N/A',
@@ -507,20 +545,20 @@
                         number_of_rejection: properties.number_of_rejection || 0,
                         lon: coordinates ? coordinates[0].toFixed(6) : 'N/A',
                         lat: coordinates ? coordinates[1].toFixed(6) : 'N/A',
-                        _feature: feature,
-                        _coords: coordinates
+                        _feature: feature, // Store reference to original feature
+                        _coords: coordinates // Store original coordinates
                     };
                 });
                 
                 // Generate the table HTML
                 var tableHTML = '';
                 if (featuresData.length > 0) {
-                    tableHTML = '<table class="item-table">' +
+                    tableHTML = '<table class="feature-table">' +
                         '<thead><tr>' +
                         '<th>Type</th>' +
                         '<th>Category</th>' +
-                        '<th>Marker</th>' +
                         '<th>Status</th>' +
+                        '<th>Created</th>' +
                         '</tr></thead><tbody>';
                     
                     featuresData.forEach(function(item, index) {
@@ -533,32 +571,24 @@
                             typeBadge = '<span class="feature-type-badge entry_point">Entry</span>';
                         }
                         
-                        tableHTML += '<tr class="item-row" data-index="' + index + '">' +
+                        tableHTML += '<tr class="feature-row" data-index="' + index + '">' +
                             '<td>' + typeBadge + '</td>' +
                             '<td>' + item.category_name + '</td>' +
-                            '<td>';
-                        
-                        if (item.marker_url) {
-                            tableHTML += '<img src="' + item.marker_url + '" class="marker-img" crossorigin="anonymous">';
-                        } else {
-                            tableHTML += 'N/A';
-                        }
-                        
-                        tableHTML += '</td>' +
                             '<td>' + item.status + '</td>' +
+                            '<td>' + formatTimestamp(item.created_at) + '</td>' +
                             '</tr>';
                     });
                     
                     tableHTML += '</tbody></table>';
                 } else {
-                    tableHTML = '<div><em>No features found in the current view. Try zooming in or panning to an area with live reports.</em></div>';
+                    tableHTML = '<div><em>No features found in the current view. Try zooming in or panning to an area with more data.</em></div>';
                 }
                 
                 // Insert the table into the DOM
                 document.getElementById('feature-table-container').innerHTML = tableHTML;
                 
-                // Add click handlers to rows
-                var rows = document.querySelectorAll('.item-row');
+                // Add click handlers to rows with passive listeners
+                var rows = document.querySelectorAll('.feature-row');
                 rows.forEach(function(row) {
                     row.addEventListener('click', function() {
                         // Remove selected class from all rows
@@ -580,16 +610,16 @@
                                 duration: 500
                             });
                             
-                            // Show highlight based on feature type
-                            highlightFeature(item);
+                            // Show highlight marker
+                            showHighlightMarker(item._coords);
                             
                             // Show feature details
                             showFeatureDetails(item);
                         }
-                    });
+                    }, { passive: true });
                 });
                 
-                // Store the features data globally for other functions
+                // Store the feature data globally for other functions
                 window.currentFeaturesData = featuresData;
             }
             
@@ -598,7 +628,7 @@
                 var detailDiv = document.getElementById('feature-detail');
                 var html = '';
                 
-                // Determine feature type display name
+                // Format the feature type for display
                 var featureTypeName = 'Unknown';
                 var featureTypeClass = '';
                 if (item.feature_type === 'poi') {
@@ -612,34 +642,33 @@
                     featureTypeClass = 'entry_point';
                 }
                 
-                // Create a detail view with properties
+                // Create a detail view with all properties
                 html += '<h3><span class="feature-type-badge ' + featureTypeClass + '">' + featureTypeName + '</span> ' + 
-                    (item.category_name || 'Unnamed') + '</h3>';
+                    (item.category_name || 'Unknown') + '</h3>';
                 
                 // Show marker if available
                 if (item.marker_url) {
                     html += '<div class="detail-row">' +
                         '<div class="detail-label">Marker:</div>' +
                         '<div class="detail-value">' +
-                        '<img src="' + item.marker_url + '" class="marker-img" crossorigin="anonymous">' +
-                        '</div></div>';
+                        '<img src="' + item.marker_url + '" class="marker-img" crossorigin="anonymous"> ' +
+                        '<a href="' + item.marker_url + '" target="_blank">View full image</a></div>' +
+                        '</div>';
                 }
                 
                 // Add timestamp
                 html += '<div class="timestamp">Created: ' + formatTimestamp(item.created_at) + '</div>';
                 
-                // Add main details
+                // Main details
                 var detailsToShow = {
-                    'ID': item.id,
+                    'Report ID': item.live_report_id,
                     'Status': item.status,
-                    'Category': item.category_name,
                     'Views': item.number_of_view,
                     'Confirms': item.number_of_confirm,
                     'Rejections': item.number_of_rejection,
                     'Location': item.lon + ', ' + item.lat
                 };
                 
-                // Add each detail
                 for (var key in detailsToShow) {
                     html += '<div class="detail-row">' +
                         '<div class="detail-label">' + key + ':</div>' +
@@ -652,22 +681,8 @@
                 detailDiv.style.display = 'block';
             }
             
-            // Function to highlight feature based on its type
-            function highlightFeature(item) {
-                // Hide both highlight elements first
-                hideHighlights();
-                
-                if (item.feature_type === 'poi' || item.feature_type === 'entry_point') {
-                    // For points, show the circular marker
-                    highlightPoint(item._coords);
-                } else if (item.feature_type === 'road_closure') {
-                    // For lines, we'll just highlight the center point for simplicity
-                    highlightPoint(item._coords);
-                }
-            }
-            
-            // Function to highlight a point
-            function highlightPoint(coords) {
+            // Function to show highlight marker
+            function showHighlightMarker(coords) {
                 var marker = document.getElementById('highlight-marker');
                 var pixel = map.getPixelFromCoordinate(ol.proj.fromLonLat(coords));
                 
@@ -681,33 +696,27 @@
                 marker.style.animation = 'pulse 1.5s infinite';
             }
             
-            // Function to hide all highlights
-            function hideHighlights() {
+            // Function to hide highlight marker
+            function hideHighlightMarker() {
                 document.getElementById('highlight-marker').style.display = 'none';
-                document.getElementById('highlight-line').style.display = 'none';
             }
             
             // Handle map clicks to show feature info
             map.on('click', function(evt) {
-                // Get the feature at the clicked pixel
-                var clickedFeature = null;
-                
-                map.forEachFeatureAtPixel(evt.pixel, function(feature, layer) {
-                    if (layer === liveReportsLayer) {
-                        clickedFeature = feature;
-                        return true; // Stop after finding the first feature
+                var feature = map.forEachFeatureAtPixel(evt.pixel, function(feature, layer) {
+                    if (layer === livePoiLayer || layer === roadClosuresLayer) {
+                        return feature;
                     }
                 });
                 
-                if (clickedFeature) {
-                    var properties = clickedFeature.getProperties();
-                    var coordinates = getFeatureCoordinates(clickedFeature);
-                    var featureType = properties.feature_type || 'unknown';
+                if (feature) {
+                    var properties = feature.getProperties();
+                    var coordinates = getFeatureCoordinates(feature);
                     
-                    // Create a data object with the feature properties
                     var featureData = {
                         id: properties.id,
-                        feature_type: featureType,
+                        feature_type: properties.feature_type || 'unknown',
+                        live_report_id: properties.live_report_id || 'N/A',
                         category_name: properties.category_name || 'N/A',
                         marker_url: properties.marker_url || '',
                         status: properties.status || 'N/A',
@@ -717,31 +726,48 @@
                         number_of_rejection: properties.number_of_rejection || 0,
                         lon: coordinates ? coordinates[0].toFixed(6) : 'N/A',
                         lat: coordinates ? coordinates[1].toFixed(6) : 'N/A',
-                        _feature: clickedFeature,
+                        _feature: feature,
                         _coords: coordinates
                     };
                     
                     // Show feature details
                     showFeatureDetails(featureData);
                     
-                    // Highlight the feature
-                    highlightFeature(featureData);
+                    // Show highlight marker
+                    if (coordinates) {
+                        showHighlightMarker(coordinates);
+                    }
                     
                     // Open data panel if not already open
                     if (!document.getElementById('data-panel').classList.contains('visible')) {
                         document.getElementById('data-panel').classList.add('visible');
                         collectVisibleFeatures();
                     }
-                } else {
-                    // If no feature was clicked, hide the details
-                    document.getElementById('feature-detail').style.display = 'none';
-                    hideHighlights();
                 }
             });
             
+            // Add animation style
+            var style = document.createElement('style');
+            style.textContent = `
+                @keyframes pulse {
+                    0% { transform: translate(-15px, -15px) scale(1); opacity: 1; }
+                    50% { transform: translate(-15px, -15px) scale(1.5); opacity: 0.5; }
+                    100% { transform: translate(-15px, -15px) scale(1); opacity: 1; }
+                }
+            `;
+            document.head.appendChild(style);
+            
+            // Add passive wheel event listener to the entire document
+            document.addEventListener('wheel', function() {}, { passive: true });
+            
+            // Add passive touch event listeners
+            var passiveHandler = function() {};
+            document.addEventListener('touchstart', passiveHandler, { passive: true });
+            document.addEventListener('touchmove', passiveHandler, { passive: true });
+            
             // Initial collection of features
             collectVisibleFeatures();
-        }
+        });
     </script>
 </body>
 </html>
