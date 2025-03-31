@@ -9,84 +9,81 @@ basepath = "/tmp/tegola-cache"
 [[providers]]
 name = "postgis_provider"
 type = "postgis"
-uri = "postgres://postgres:postgres@postgis:5432/spatial_db?sslmode=disable"
+uri = "postgres://postgres:admin123.@192.168.8.47:5432/TrafficReportDb?sslmode=disable"
 srid = 4326
 max_connections = 10
 
-  # New layers for live reports
+  # Combined layer for all live reports (POIs, road closures, and entry points)
   [[providers.layers]]
-  name = "live_report_poi"
+  name = "live_reports"
   geometry_fieldname = "geom"
   id_fieldname = "id"
   sql = """
-    SELECT 
-      id, 
-      live_report_id, 
-      category_name, 
-      marker_url, 
-      status,
-      created_at,
-      number_of_view,
-      number_of_confirm,
+  
+   SELECT 
+      lv.tegola_id as id, 
+      lv.id as live_report_id, 
+      ct.name as category_name, 
+      ct.marker_image_url as marker_url, 
+      lv.status,
+      lv.created_at,
+      lv.number_of_view,
+      lv.number_of_confirm,
+      lv.number_of_rejection,
       'poi' as feature_type,
-      ST_AsBinary(geom) AS geom 
+      ST_AsBinary(lv.points) AS geom 
     FROM 
-      public.tegola_live_report_poi 
-    WHERE 
-      geom && !BBOX! 
-      AND geom IS NOT NULL
-      AND geom_type = 'POINT'
-      AND status = 'ACTIVE'
-  """
-
-  [[providers.layers]]
-  name = "live_report_road_closure"
-  geometry_fieldname = "geom"
-  id_fieldname = "id"
-  sql = """
-    SELECT 
-      id, 
-      live_report_id, 
-      category_name, 
-      marker_url, 
-      status,
-      created_at,
-      number_of_view,
-      number_of_confirm,
+      public."live-report-test" lv
+	LEFT JOIN public."traffic-category" ct on lv.category_id = ct.id
+    WHERE
+	  lv.points && !BBOX! 
+	  AND lv.points IS NOT NULL
+	  AND lv.geom_type = 'POINT'
+	  
+    UNION ALL
+    
+   SELECT 
+      lv.tegola_id as id, 
+      lv.id as live_report_id, 
+      ct.name as category_name, 
+      '' as marker_url, 
+      lv.status,
+      lv.created_at,
+      lv.number_of_view,
+      lv.number_of_confirm,
+      lv.number_of_rejection,
       'road_closure' as feature_type,
-      ST_AsBinary(No_Entry_Roads) AS geom 
+      ST_AsBinary(lv.lines) AS geom 
     FROM 
-      public.tegola_live_report_poi 
-    WHERE 
-      No_Entry_Roads && !BBOX! 
-      AND No_Entry_Roads IS NOT NULL
-      AND status = 'ACTIVE'
-  """
-
-  [[providers.layers]]
-  name = "live_report_entry_points"
-  geometry_fieldname = "geom"
-  id_fieldname = "id"
-  sql = """
-    SELECT 
-      id, 
-      live_report_id, 
-      category_name, 
-      marker_url, 
-      status,
-      created_at,
-      number_of_view,
-      number_of_confirm,
-      'entry_points' as feature_type,
-      ST_AsBinary(No_Entry_Points) AS geom 
+      public."live-report-test" lv
+	LEFT JOIN public."traffic-category" ct on lv.category_id = ct.id
+    WHERE
+	  lv.lines && !BBOX! 
+	  AND lv.lines IS NOT NULL
+	  AND lv.geom_type = 'NO_ENTRY_ROAD'
+    
+    UNION ALL
+    
+   SELECT 
+      lv.tegola_id as id, 
+      lv.id as live_report_id, 
+      ct.name as category_name, 
+      ct.marker_image_url as marker_url, 
+      lv.status,
+      lv.created_at,
+      lv.number_of_view,
+      lv.number_of_confirm,
+      lv.number_of_rejection,
+      'entry_point' as feature_type,
+      ST_AsBinary(lv.points) AS geom 
     FROM 
-      public.tegola_live_report_poi 
-    WHERE 
-      No_Entry_Points && !BBOX! 
-      AND No_Entry_Points IS NOT NULL
-      AND status = 'ACTIVE'
+      public."live-report-test" lv
+	LEFT JOIN public."traffic-category" ct on lv.category_id = ct.id
+    WHERE
+	  lv.lines && !BBOX! 
+	  AND lv.lines IS NOT NULL
+	  AND lv.geom_type = 'NO_ENTRY_ROAD'
   """
-
 
 [[maps]]
 name = "livereports"
@@ -95,28 +92,10 @@ bounds = [-180.0, -85.0511, 180.0, 85.0511]
 center = [106.675327, 10.7590847, 14.0]  # Ho Chi Minh City
 
   [[maps.layers]]
-  name = "live_report_poi"
-  provider_layer = "postgis_provider.live_report_poi"
+  name = "live_reports"
+  provider_layer = "postgis_provider.live_reports"
   min_zoom = 10
   max_zoom = 22
   
     [maps.layers.default_tags]
-    class = "live_poi"
-
-  [[maps.layers]]
-  name = "live_report_road_closure"
-  provider_layer = "postgis_provider.live_report_road_closure"
-  min_zoom = 10
-  max_zoom = 22
-  
-    [maps.layers.default_tags]
-    class = "road_closure"
-
-  [[maps.layers]]
-  name = "live_report_entry_points"
-  provider_layer = "postgis_provider.live_report_entry_points"
-  min_zoom = 10
-  max_zoom = 22
-  
-    [maps.layers.default_tags]
-    class = "entry_points"
+    class = "live_reports"
