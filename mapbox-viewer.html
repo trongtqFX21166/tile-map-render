@@ -1,0 +1,855 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tegola Live Reports (Mapbox GL)</title>
+    <!-- Mapbox GL JS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mapbox-gl/2.15.0/mapbox-gl.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/mapbox-gl/2.15.0/mapbox-gl.css">
+    <style>
+        body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
+        #map { position: absolute; top: 0; bottom: 0; width: 100%; height: 100%; }
+        
+        /* Control panel */
+        .map-control {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 10px;
+            border-radius: 3px;
+            z-index: 1;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+            max-width: 300px;
+        }
+        
+        /* Slider styling */
+        input[type=range] {
+            width: 100%;
+            margin: 5px 0;
+        }
+        
+        /* Data panel */
+        #data-panel {
+            position: absolute;
+            left: 10px;
+            top: 10px;
+            bottom: 10px;
+            width: 350px;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px;
+            border-radius: 4px;
+            z-index: 1;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+            overflow-y: auto;
+            transform: translateX(-380px);
+            transition: transform 0.3s ease;
+            overscroll-behavior: contain;
+        }
+        
+        #data-panel.visible {
+            transform: translateX(0);
+        }
+        
+        #show-data-btn {
+            position: absolute;
+            left: 20px;
+            bottom: 20px;
+            padding: 10px 15px;
+            background: #4285F4;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            z-index: 1;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+        }
+        
+        #show-data-btn:hover {
+            background: #3367D6;
+        }
+        
+        #close-panel {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            cursor: pointer;
+            font-size: 20px;
+            color: #555;
+        }
+        
+        .feature-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        
+        .feature-table th, .feature-table td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+            font-size: 13px;
+        }
+        
+        .feature-table th {
+            background-color: #f2f2f2;
+            position: sticky;
+            top: 0;
+        }
+        
+        .feature-row:hover {
+            background-color: #f5f5f5;
+            cursor: pointer;
+        }
+        
+        .feature-row.selected {
+            background-color: #e3f2fd;
+        }
+        
+        /* Updated marker image styles */
+        .marker-img {
+            width: 56px;
+            height: 56px;
+            object-fit: contain;
+            vertical-align: middle;
+            border: 1px solid #ddd;
+            background-color: #f9f9f9;
+        }
+        
+        .marker-img-small {
+            width: 32px;
+            height: 32px;
+            object-fit: contain;
+            vertical-align: middle;
+            border: 1px solid #ddd;
+            background-color: #f9f9f9;
+        }
+        
+        .marker-img-tiny {
+            width: 24px;
+            height: 24px;
+            object-fit: contain;
+            vertical-align: middle;
+            border: 1px solid #ddd;
+            background-color: #f9f9f9;
+        }
+        
+        .count-badge {
+            display: inline-block;
+            background: #4285F4;
+            color: white;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            text-align: center;
+            line-height: 24px;
+            margin-left: 10px;
+        }
+        
+        .highlight-marker {
+            background-color: red;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            border: 2px solid white;
+            animation: pulse 1.5s infinite;
+        }
+
+        .loading {
+            display: inline-block;
+            margin-left: 10px;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(0,0,0,0.1);
+            border-radius: 50%;
+            border-top-color: #4285F4;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .feature-detail {
+            background-color: #f9f9f9;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 10px;
+            border: 1px solid #ddd;
+        }
+
+        .detail-row {
+            display: flex;
+            margin-bottom: 5px;
+            align-items: flex-start;
+        }
+
+        .detail-label {
+            font-weight: bold;
+            width: 120px;
+            flex-shrink: 0;
+            padding-top: 5px;
+        }
+
+        .detail-value {
+            flex-grow: 1;
+            word-break: break-all;
+        }
+        
+        .feature-type-badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            color: white;
+            margin-right: 8px;
+        }
+        
+        .feature-type-badge.poi {
+            background-color: #4285F4;
+        }
+        
+        .feature-type-badge.road_closure {
+            background-color: #EA4335;
+        }
+        
+        .feature-type-badge.entry_point {
+            background-color: #34A853;
+        }
+        
+        .timestamp {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+        
+        /* Image viewer overlay */
+        .image-viewer {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(0,0,0,0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            display: none;
+        }
+        
+        .image-viewer img {
+            max-width: 90%;
+            max-height: 90%;
+            object-fit: contain;
+            background-color: white;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        }
+        
+        .image-viewer-close {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            color: white;
+            font-size: 30px;
+            cursor: pointer;
+        }
+        
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.5); opacity: 0.5; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    
+    <div class="map-control">
+        <h3>Tegola Live Reports</h3>
+        <div><strong>Zoom:</strong> <span id="zoom-level">0</span></div>
+        <div><strong>Center:</strong> <span id="center-coords">0, 0</span></div>
+        <div>
+            <strong>Visible Layers:</strong>
+            <div>
+                <input type="checkbox" id="live-poi-layer" checked>
+                <label for="live-poi-layer">Live POI</label>
+            </div>
+            <div>
+                <input type="checkbox" id="road-closures-layer" checked>
+                <label for="road-closures-layer">Road Closures</label>
+            </div>
+            <div>
+                <input type="checkbox" id="entry-points-layer" checked>
+                <label for="entry-points-layer">Entry Points</label>
+            </div>
+        </div>
+        <div style="margin-top: 10px;">
+            <strong>Marker Size:</strong>
+            <div>
+                <input type="range" id="marker-size" min="0.2" max="2" step="0.1" value="1.0">
+                <span id="marker-size-value">1.0x</span>
+            </div>
+        </div>
+    </div>
+    
+    <button id="show-data-btn">Show Feature Data</button>
+    
+    <div id="data-panel">
+        <span id="close-panel">&times;</span>
+        <h2>Live Reports <span class="count-badge" id="feature-count">0</span></h2>
+        <p>Click on features on the map to view details. <span id="loading-indicator" class="loading" style="display: none;"></span></p>
+        <div id="feature-detail" class="feature-detail" style="display: none;">
+            <!-- Feature details will be inserted here -->
+        </div>
+        <h3>All Reports in View</h3>
+        <div id="feature-table-container"></div>
+    </div>
+    
+    <!-- Image viewer overlay for larger marker images -->
+    <div class="image-viewer" id="image-viewer">
+        <span class="image-viewer-close" id="image-viewer-close">&times;</span>
+        <img id="full-size-image" src="" alt="Marker Image">
+    </div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Store visible features and marker references
+            var visibleFeatures = [];
+            var markerElements = {};
+            var highlightMarker = null;
+            var markerSize = 1.0;
+            
+            // Initialize Mapbox map
+            mapboxgl.accessToken = 'pk.eyJ1IjoidHJvbmd0cSIsImEiOiJjbTdyODBwbjQwMTMwMnNwcXBjbHA1aXU2In0.dXk_lGoSMiWub-XqulJehg'; // Not needed for local vector tiles
+            
+            var map = new mapboxgl.Map({
+                container: 'map',
+                style: {
+                    'version': 8,
+                    'sources': {
+                        'osm': {
+                            'type': 'raster',
+                            'tiles': [
+                                'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                                'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                                'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png'
+                            ],
+                            'tileSize': 256,
+                            'attribution': '© OpenStreetMap Contributors'
+                        },
+                        'tegola-live-poi': {
+                            'type': 'vector',
+                            'tiles': ['http://localhost:8080/maps/livereports/live_poi/{z}/{x}/{y}.pbf'],
+                            'minzoom': 10,
+                            'maxzoom': 22
+                        },
+                        'tegola-road-closure-lines': {
+                            'type': 'vector',
+                            'tiles': ['http://localhost:8080/maps/livereports/road_closure_lines/{z}/{x}/{y}.pbf'],
+                            'minzoom': 10,
+                            'maxzoom': 22
+                        },
+                        'tegola-road-closure-points': {
+                            'type': 'vector',
+                            'tiles': ['http://localhost:8080/maps/livereports/road_closure_points/{z}/{x}/{y}.pbf'],
+                            'minzoom': 10,
+                            'maxzoom': 22
+                        }
+                    },
+                    'layers': [
+                        {
+                            'id': 'osm-background',
+                            'type': 'raster',
+                            'source': 'osm',
+                            'minzoom': 0,
+                            'maxzoom': 22,
+                            'paint': {}
+                        }
+                    ]
+                },
+                center: [106.675327, 10.7590847], // Ho Chi Minh City
+                zoom: 14
+            });
+            
+            // Helper function to convert Unix timestamp to human-readable format
+            function formatTimestamp(timestamp) {
+                if (!timestamp) return 'N/A';
+                // Convert from milliseconds to seconds if necessary
+                if (timestamp > 1000000000000) {
+                    timestamp = Math.floor(timestamp / 1000);
+                }
+                var date = new Date(timestamp * 1000);
+                return date.toLocaleString();
+            }
+            
+            // Wait for map to load before adding layers
+            map.on('load', function() {
+                // Add POI layer for points
+                map.addLayer({
+                    'id': 'live-poi-circles',
+                    'type': 'circle',
+                    'source': 'tegola-live-poi',
+                    'source-layer': 'live_poi',
+                    'paint': {
+                        'circle-radius': 8,
+                        'circle-color': [
+                            'match',
+                            ['get', 'status'],
+                            'ACTIVE', '#4285F4',
+                            'EXPIRED', '#AAAAAA',
+                            'REJECTED', '#EA4335',
+                            'CONFIRMED', '#34A853',
+                            '#4285F4' // default
+                        ],
+                        'circle-stroke-width': 2,
+                        'circle-stroke-color': '#ffffff'
+                    }
+                });
+                
+                // Add road closure layer for linestrings
+                map.addLayer({
+                    'id': 'road-closures-lines',
+                    'type': 'line',
+                    'source': 'tegola-road-closure-lines',
+                    'source-layer': 'road_closure_lines',
+                    'paint': {
+                        'line-color': '#EA4335',
+                        'line-width': 4,
+                        'line-dasharray': [2, 1]
+                    }
+                });
+                
+                // Add entry point layer for road closure points
+                map.addLayer({
+                    'id': 'road-closures-points',
+                    'type': 'circle',
+                    'source': 'tegola-road-closure-points',
+                    'source-layer': 'road_closure_points',
+                    'paint': {
+                        'circle-radius': 6,
+                        'circle-color': '#34A853',
+                        'circle-stroke-width': 2,
+                        'circle-stroke-color': '#ffffff'
+                    }
+                });
+                
+                // Add labels for POIs
+                map.addLayer({
+                    'id': 'live-poi-labels',
+                    'type': 'symbol',
+                    'source': 'tegola-live-poi',
+                    'source-layer': 'live_poi',
+                    'layout': {
+                        'text-field': ['get', 'category_name'],
+                        'text-font': ['Open Sans Regular'],
+                        'text-size': 12,
+                        'text-offset': [0, 1.5],
+                        'text-anchor': 'top'
+                    },
+                    'paint': {
+                        'text-color': '#333',
+                        'text-halo-color': '#fff',
+                        'text-halo-width': 2
+                    }
+                });
+                
+                // When map is clicked, display feature info
+                map.on('click', function(e) {
+                    // Query features at click point
+                    var features = map.queryRenderedFeatures(e.point, {
+                        layers: ['live-poi-circles', 'road-closures-lines', 'road-closures-points']
+                    });
+                    
+                    if (features.length > 0) {
+                        var feature = features[0];
+                        var coordinates;
+                        
+                        // Get coordinates based on geometry type
+                        if (feature.geometry.type === 'Point') {
+                            coordinates = feature.geometry.coordinates.slice();
+                        } else if (feature.geometry.type === 'LineString') {
+                            // For LineString, use the midpoint
+                            var line = feature.geometry.coordinates;
+                            var midIndex = Math.floor(line.length / 2);
+                            coordinates = line[midIndex].slice();
+                        }
+                        
+                        // Show highlight marker
+                        showHighlightMarker(coordinates);
+                        
+                        // Show feature details
+                        showFeatureDetails(feature);
+                        
+                        // Open data panel if not already open
+                        if (!document.getElementById('data-panel').classList.contains('visible')) {
+                            document.getElementById('data-panel').classList.add('visible');
+                            collectVisibleFeatures();
+                        }
+                    }
+                });
+                
+                // Update map info on move
+                map.on('moveend', function() {
+                    updateMapInfo();
+                    collectVisibleFeatures();
+                });
+                
+                // Change cursor on hover over features
+                map.on('mouseenter', ['live-poi-circles', 'road-closures-lines', 'road-closures-points'], function() {
+                    map.getCanvas().style.cursor = 'pointer';
+                });
+                
+                map.on('mouseleave', ['live-poi-circles', 'road-closures-lines', 'road-closures-points'], function() {
+                    map.getCanvas().style.cursor = '';
+                });
+                
+                // Initial update
+                updateMapInfo();
+                collectVisibleFeatures();
+            });
+            
+            // Update the map information display
+            function updateMapInfo() {
+                var center = map.getCenter();
+                var zoom = map.getZoom().toFixed(2);
+                
+                document.getElementById('zoom-level').textContent = zoom;
+                document.getElementById('center-coords').textContent = 
+                    center.lng.toFixed(4) + ', ' + center.lat.toFixed(4);
+            }
+            
+            // Show highlight marker at coordinates
+            function showHighlightMarker(coordinates) {
+                // Remove existing highlight marker if any
+                if (highlightMarker) {
+                    highlightMarker.remove();
+                }
+                
+                // Create a highlight marker
+                var markerEl = document.createElement('div');
+                markerEl.className = 'highlight-marker';
+                
+                highlightMarker = new mapboxgl.Marker(markerEl)
+                    .setLngLat(coordinates)
+                    .addTo(map);
+            }
+            
+            // Layer visibility controls
+            document.getElementById('live-poi-layer').addEventListener('change', function(e) {
+                var visibility = e.target.checked ? 'visible' : 'none';
+                map.setLayoutProperty('live-poi-circles', 'visibility', visibility);
+                map.setLayoutProperty('live-poi-labels', 'visibility', visibility);
+                collectVisibleFeatures();
+            });
+            
+            document.getElementById('road-closures-layer').addEventListener('change', function(e) {
+                var visibility = e.target.checked ? 'visible' : 'none';
+                map.setLayoutProperty('road-closures-lines', 'visibility', visibility);
+                collectVisibleFeatures();
+            });
+            
+            document.getElementById('entry-points-layer').addEventListener('change', function(e) {
+                var visibility = e.target.checked ? 'visible' : 'none';
+                map.setLayoutProperty('road-closures-points', 'visibility', visibility);
+                collectVisibleFeatures();
+            });
+            
+            // Marker size control
+            document.getElementById('marker-size').addEventListener('input', function(e) {
+                markerSize = parseFloat(e.target.value);
+                document.getElementById('marker-size-value').textContent = markerSize.toFixed(1) + 'x';
+                
+                // Update circle radius for point layers
+                map.setPaintProperty('live-poi-circles', 'circle-radius', 8 * markerSize);
+                map.setPaintProperty('road-closures-points', 'circle-radius', 6 * markerSize);
+                
+                // Update line width for road closures
+                map.setPaintProperty('road-closures-lines', 'line-width', 4 * markerSize);
+            });
+            
+            // Data panel toggle
+            document.getElementById('show-data-btn').addEventListener('click', function() {
+                document.getElementById('data-panel').classList.add('visible');
+                collectVisibleFeatures();
+            });
+            
+            // Close panel button
+            document.getElementById('close-panel').addEventListener('click', function() {
+                document.getElementById('data-panel').classList.remove('visible');
+                
+                // Remove highlight marker
+                if (highlightMarker) {
+                    highlightMarker.remove();
+                    highlightMarker = null;
+                }
+            });
+            
+            // Close image viewer
+            document.getElementById('image-viewer-close').addEventListener('click', function() {
+                document.getElementById('image-viewer').style.display = 'none';
+            });
+            
+            // Function to collect visible features
+            function collectVisibleFeatures() {
+                // Make sure map is loaded
+                if (!map.loaded()) return;
+                
+                // Show loading indicator
+                document.getElementById('loading-indicator').style.display = 'inline-block';
+                
+                // Clear previous features
+                visibleFeatures = [];
+                
+                // Query visible features in the viewport
+                var poiFeatures = map.queryRenderedFeatures({ layers: ['live-poi-circles'] });
+                var roadClosureFeatures = map.queryRenderedFeatures({ layers: ['road-closures-lines'] });
+                var entryPointFeatures = map.queryRenderedFeatures({ layers: ['road-closures-points'] });
+                
+                // Combine all features
+                var allFeatures = [].concat(poiFeatures, roadClosureFeatures, entryPointFeatures);
+                
+                // Deduplicate by ID and layer
+                var featureMap = {};
+                
+                allFeatures.forEach(function(feature) {
+                    var key = feature.properties.id + '-' + feature.layer.id;
+                    
+                    if (!featureMap[key]) {
+                        featureMap[key] = feature;
+                        visibleFeatures.push(feature);
+                    }
+                });
+                
+                // Update the table with discovered features
+                updateFeatureTable();
+                
+                // Hide loading indicator
+                document.getElementById('loading-indicator').style.display = 'none';
+            }
+            
+            // Function to update feature table
+            function updateFeatureTable() {
+                // Update count badge
+                document.getElementById('feature-count').textContent = visibleFeatures.length;
+                
+                // Create array of feature data objects
+                var featuresData = visibleFeatures.map(function(feature) {
+                    var props = feature.properties;
+                    var layerId = feature.layer.id;
+                    
+                    // Determine feature type based on layer
+                    var featureType;
+                    if (layerId === 'live-poi-circles') {
+                        featureType = 'poi';
+                    } else if (layerId === 'road-closures-lines') {
+                        featureType = 'road_closure';
+                    } else if (layerId === 'road-closures-points') {
+                        featureType = 'entry_point';
+                    } else {
+                        featureType = props.feature_type || 'unknown';
+                    }
+                    
+                    // Create object with properties we want to display
+                    return {
+                        id: props.id,
+                        feature_type: featureType,
+                        live_report_id: props.live_report_id || 'N/A',
+                        category_name: props.category_name || 'N/A',
+                        marker_url: props.marker_url || '',
+                        status: props.status || 'N/A',
+                        created_at: props.created_at || 0,
+                        number_of_view: props.number_of_view || 0,
+                        number_of_confirm: props.number_of_confirm || 0,
+                        number_of_rejection: props.number_of_rejection || 0,
+                        _feature: feature // Store reference to original feature
+                    };
+                });
+                
+                // Generate the table HTML
+                var tableHTML = '';
+                if (featuresData.length > 0) {
+                    tableHTML = '<table class="feature-table">' +
+                        '<thead><tr>' +
+                        '<th>Type</th>' +
+                        '<th>Category</th>' +
+                        '<th>Status</th>' +
+                        '<th>Created</th>' +
+                        '</tr></thead><tbody>';
+                    
+                    featuresData.forEach(function(item, index) {
+                        var typeBadge = '';
+                        if (item.feature_type === 'poi') {
+                            typeBadge = '<span class="feature-type-badge poi">POI</span>';
+                        } else if (item.feature_type === 'road_closure') {
+                            typeBadge = '<span class="feature-type-badge road_closure">Road</span>';
+                        } else if (item.feature_type === 'entry_point') {
+                            typeBadge = '<span class="feature-type-badge entry_point">Entry</span>';
+                        }
+                        
+                        tableHTML += '<tr class="feature-row" data-index="' + index + '">' +
+                            '<td>' + typeBadge + '</td>' +
+                            '<td>' + item.category_name + '</td>' +
+                            '<td>' + item.status + '</td>' +
+                            '<td>' + formatTimestamp(item.created_at) + '</td>' +
+                            '</tr>';
+                    });
+                    
+                    tableHTML += '</tbody></table>';
+                } else {
+                    tableHTML = '<div><em>No features found in the current view. Try zooming in or panning to an area with more data.</em></div>';
+                }
+                
+                // Insert the table into the DOM
+                document.getElementById('feature-table-container').innerHTML = tableHTML;
+                
+                // Add click handlers to rows
+                var rows = document.querySelectorAll('.feature-row');
+                rows.forEach(function(row) {
+                    row.addEventListener('click', function() {
+                        // Remove selected class from all rows
+                        rows.forEach(function(r) {
+                            r.classList.remove('selected');
+                        });
+                        
+                        // Add selected class to clicked row
+                        this.classList.add('selected');
+                        
+                        // Get the feature data
+                        var index = parseInt(this.getAttribute('data-index'));
+                        var item = featuresData[index];
+                        
+                        // Center map on the feature
+                        var feature = item._feature;
+                        var coordinates;
+                        
+                        if (feature.geometry.type === 'Point') {
+                            coordinates = feature.geometry.coordinates.slice();
+                        } else if (feature.geometry.type === 'LineString') {
+                            // For LineString, use the midpoint
+                            var line = feature.geometry.coordinates;
+                            var midIndex = Math.floor(line.length / 2);
+                            coordinates = line[midIndex].slice();
+                        }
+                        
+                        if (coordinates) {
+                            // Fly to location
+                            map.flyTo({
+                                center: coordinates,
+                                zoom: 16,
+                                essential: true
+                            });
+                            
+                            // Show highlight marker
+                            showHighlightMarker(coordinates);
+                        }
+                        
+                        // Show feature details
+                        showFeatureDetails(feature);
+                    });
+                });
+                
+                // Store the feature data globally for other functions
+                window.currentFeaturesData = featuresData;
+            }
+            
+            // Function to show feature details
+            function showFeatureDetails(feature) {
+                var detailDiv = document.getElementById('feature-detail');
+                var props = feature.properties;
+                var layerId = feature.layer.id;
+                
+                // Determine feature type based on layer
+                var featureType, featureTypeClass, featureTypeName;
+                if (layerId === 'live-poi-circles') {
+                    featureType = 'poi';
+                    featureTypeClass = 'poi';
+                    featureTypeName = 'Point of Interest';
+                } else if (layerId === 'road-closures-lines') {
+                    featureType = 'road_closure';
+                    featureTypeClass = 'road_closure';
+                    featureTypeName = 'Road Closure';
+                } else if (layerId === 'road-closures-points') {
+                    featureType = 'entry_point';
+                    featureTypeClass = 'entry_point';
+                    featureTypeName = 'Entry Point';
+                } else {
+                    featureType = props.feature_type || 'unknown';
+                    featureTypeClass = featureType;
+                    featureTypeName = featureType.charAt(0).toUpperCase() + featureType.slice(1).replace('_', ' ');
+                }
+                
+                var html = '<h3><span class="feature-type-badge ' + featureTypeClass + '">' + featureTypeName + '</span> ' + 
+                    (props.category_name || 'Unknown') + '</h3>';
+                
+                // Show marker if available
+                if (props.marker_url) {
+                    html += '<div style="text-align: center; margin-bottom: 15px;">' +
+                        '<img src="' + props.marker_url + '" class="marker-img" data-fullimg="' + props.marker_url + '" ' +
+                        'style="cursor: pointer;" title="Click to view full size" crossorigin="anonymous">' +
+                        '</div>';
+                }
+                
+                // Add timestamp
+                html += '<div class="timestamp">Created: ' + formatTimestamp(props.created_at) + '</div>';
+                
+                // Main details
+                var detailsToShow = {
+                    'Report ID': props.live_report_id || props.id,
+                    'Status': props.status || 'N/A',
+                    'Views': props.number_of_view || 0,
+                    'Confirms': props.number_of_confirm || 0,
+                    'Rejections': props.number_of_rejection || 0
+                };
+                
+                for (var key in detailsToShow) {
+                    html += '<div class="detail-row">' +
+                        '<div class="detail-label">' + key + ':</div>' +
+                        '<div class="detail-value">' + detailsToShow[key] + '</div>' +
+                        '</div>';
+                }
+                
+                // Add coordinates
+                if (feature.geometry.type === 'Point') {
+                    var coords = feature.geometry.coordinates;
+                    html += '<div class="detail-row">' +
+                        '<div class="detail-label">Coordinates:</div>' +
+                        '<div class="detail-value">' + coords[0].toFixed(6) + ', ' + coords[1].toFixed(6) + '</div>' +
+                        '</div>';
+                }
+                
+                // If marker_url exists, show it as a link at the bottom
+                if (props.marker_url) {
+                    html += '<div class="detail-row" style="margin-top: 10px;">' +
+                        '<div class="detail-label">Marker URL:</div>' +
+                        '<div class="detail-value">' +
+                        '<a href="' + props.marker_url + '" target="_blank">' + 
+                        props.marker_url + '</a></div>' +
+                        '</div>';
+                }
+                
+                // Set the content and show the detail panel
+                detailDiv.innerHTML = html;
+                detailDiv.style.display = 'block';
+                
+                // Add click handlers to marker images for full-size viewing
+                var markerImages = detailDiv.querySelectorAll('.marker-img, .marker-img-small, .marker-img-tiny');
+                markerImages.forEach(function(img) {
+                    img.addEventListener('click', function() {
+                        // Get the full image URL
+                        var fullImgUrl = this.getAttribute('data-fullimg');
+                        if (fullImgUrl) {
+                            // Set the image source
+                            document.getElementById('full-size-image').src = fullImgUrl;
+                            
+                            // Show the image viewer
+                            document.getElementById('image-viewer').style.display = 'flex';
+                        }
+                    });
+                });
+            }
+        });
+    </script>
+</body>
+</html>

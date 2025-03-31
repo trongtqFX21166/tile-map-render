@@ -1,10 +1,15 @@
 [webserver]
 port = ":8080"
 hostname = "0.0.0.0"
+cors_allowed_origins = ["*"]  # Enable CORS for Mapbox GL JS
 
 [cache]
 type = "file"
 basepath = "/tmp/tegola-cache"
+
+# MVT configuration for better compatibility with Mapbox GL
+[mvt_provider]
+tile_buffer = 256  # Default MVT tile buffer
 
 [[providers]]
 name = "postgis_provider"
@@ -13,83 +18,89 @@ uri = "postgres://postgres:admin123.@192.168.8.47:5432/TrafficReportDb?sslmode=d
 srid = 4326
 max_connections = 10
 
-  # POI Layer
+  # Live reports POI layer
   [[providers.layers]]
   name = "live_poi"
   geometry_fieldname = "geom"
   id_fieldname = "id"
   sql = """
    SELECT 
-      lv.tegola_id as id, 
-      lv.id as live_report_id, 
-      ct.name as category_name, 
-      ct.marker_image_url as marker_url, 
-      lv.status,
-      lv.created_at,
-      lv.number_of_view,
-      lv.number_of_confirm,
-      lv.number_of_rejection,
-      'poi' as feature_type,
-      ST_AsBinary(lv.points) AS geom 
-    FROM 
-      public."live-report-test" lv
-    LEFT JOIN public."traffic-category" ct on lv.category_id = ct.id
-    WHERE
-      lv.points && !BBOX! 
-      AND lv.points IS NOT NULL
-      AND lv.geom_type = 'POINT'
+	  lv.tegola_id as id, 
+	  lv.id as live_report_id, 
+	  ct.name as category_name, 
+	  ct.marker_image_url as marker_url, 
+	  lv.status,
+	  lv.created_at,
+	  lv.number_of_view,
+	  lv.number_of_confirm,
+	  lv.number_of_rejection,
+	  'poi' as feature_type,
+	  ST_AsBinary(lv.points) AS geom 
+	FROM 
+	  public."live-report-test" lv
+	LEFT JOIN public."traffic-category" ct on lv.category_id = ct.id
+	WHERE
+	  lv.points && !BBOX! 
+	  AND lv.points IS NOT NULL
+	  AND lv.geom_type = 'POINT'
   """
 
-  # Road Closure Layer
+  # Road closure lines layer - explicitly query for lines
   [[providers.layers]]
-  name = "road_closures"
+  name = "road_closure_lines"
   geometry_fieldname = "geom"
   id_fieldname = "id"
   sql = """
-   SELECT 
-      lv.tegola_id as id, 
-      lv.id as live_report_id, 
-      ct.name as category_name, 
-      '' as marker_url, 
-      lv.status,
-      lv.created_at,
-      lv.number_of_view,
-      lv.number_of_confirm,
-      lv.number_of_rejection,
-      'road_closure' as feature_type,
-      ST_AsBinary(lv.lines) AS geom 
-    FROM 
-      public."live-report-test" lv
-    LEFT JOIN public."traffic-category" ct on lv.category_id = ct.id
-    WHERE
-      lv.lines && !BBOX! 
-      AND lv.lines IS NOT NULL
-      AND lv.geom_type = 'ROAD_CLOSED'
-   
-   UNION ALL
-   
-    SELECT 
-      lv.tegola_id as id, 
-      lv.id as live_report_id, 
-      ct.name as category_name, 
-      ct.marker_image_url as marker_url, 
-      lv.status,
-      lv.created_at,
-      lv.number_of_view,
-      lv.number_of_confirm,
-      lv.number_of_rejection,
-      'entry_point' as feature_type,
-      ST_AsBinary(lv.points) AS geom 
-    FROM 
-      public."live-report-test" lv
-    LEFT JOIN public."traffic-category" ct on lv.category_id = ct.id
-    WHERE
-      lv.points && !BBOX! 
-      AND lv.points IS NOT NULL
-      AND lv.geom_type = 'ROAD_CLOSED'  
-     
+	SELECT 
+	  lv.tegola_id as id, 
+	  lv.id as live_report_id, 
+	  ct.name as category_name, 
+	  '' as marker_url, 
+	  lv.status,
+	  lv.created_at,
+	  lv.number_of_view,
+	  lv.number_of_confirm,
+	  lv.number_of_rejection,
+	  'road_closure' as feature_type,
+	  ST_AsBinary(lv.lines) AS geom 
+	FROM 
+	  public."live-report-test" lv
+	LEFT JOIN public."traffic-category" ct on lv.category_id = ct.id
+	WHERE
+	  lv.lines && !BBOX! 
+	  AND lv.lines IS NOT NULL
+	  AND lv.geom_type = 'ROAD_CLOSED'
   """
     
+  # Road closure entry points layer - explicitly query for points
+  [[providers.layers]]
+  name = "road_closure_points"
+  geometry_fieldname = "geom"
+  id_fieldname = "id"
+  sql = """
+	SELECT 
+	  lv.tegola_id as id, 
+	  lv.id as live_report_id, 
+	  ct.name as category_name, 
+	  ct.marker_image_url as marker_url, 
+	  lv.status,
+	  lv.created_at,
+	  lv.number_of_view,
+	  lv.number_of_confirm,
+	  lv.number_of_rejection,
+	  'entry_point' as feature_type,
+	  ST_AsBinary(lv.points) AS geom 
+	FROM 
+	  public."live-report-test" lv
+	LEFT JOIN public."traffic-category" ct on lv.category_id = ct.id
+	WHERE
+	  lv.points && !BBOX! 
+	  AND lv.points IS NOT NULL
+	  AND lv.geom_type = 'ROAD_CLOSED'  
+  """
+
+# Base map removed as it depends on removed provider layers
+
 # Live reports map with separate layers
 [[maps]]
 name = "livereports"
@@ -107,10 +118,19 @@ center = [106.675327, 10.7590847, 14.0]  # Ho Chi Minh City
     class = "live_poi"
 
   [[maps.layers]]
-  name = "road_closures"
-  provider_layer = "postgis_provider.road_closures"
+  name = "road_closure_lines"
+  provider_layer = "postgis_provider.road_closure_lines"
   min_zoom = 10
   max_zoom = 22
   
     [maps.layers.default_tags]
-    class = "road_closures"
+    class = "road_closure"
+
+  [[maps.layers]]
+  name = "road_closure_points"
+  provider_layer = "postgis_provider.road_closure_points"
+  min_zoom = 10
+  max_zoom = 22
+  
+    [maps.layers.default_tags]
+    class = "entry_point"
