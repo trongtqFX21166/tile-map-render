@@ -13,13 +13,12 @@ uri = "postgres://postgres:admin123.@192.168.8.47:5432/TrafficReportDb?sslmode=d
 srid = 4326
 max_connections = 10
 
-  # Combined layer for all live reports (POIs, road closures, and entry points)
+  # POI Layer
   [[providers.layers]]
-  name = "live_reports"
+  name = "live_poi"
   geometry_fieldname = "geom"
   id_fieldname = "id"
   sql = """
-  
    SELECT 
       lv.tegola_id as id, 
       lv.id as live_report_id, 
@@ -34,14 +33,19 @@ max_connections = 10
       ST_AsBinary(lv.points) AS geom 
     FROM 
       public."live-report-test" lv
-	LEFT JOIN public."traffic-category" ct on lv.category_id = ct.id
+    LEFT JOIN public."traffic-category" ct on lv.category_id = ct.id
     WHERE
-	  lv.points && !BBOX! 
-	  AND lv.points IS NOT NULL
-	  AND lv.geom_type = 'POINT'
-	  
-    UNION ALL
-    
+      lv.points && !BBOX! 
+      AND lv.points IS NOT NULL
+      AND lv.geom_type = 'POINT'
+  """
+
+  # Road Closure Layer
+  [[providers.layers]]
+  name = "road_closures"
+  geometry_fieldname = "geom"
+  id_fieldname = "id"
+  sql = """
    SELECT 
       lv.tegola_id as id, 
       lv.id as live_report_id, 
@@ -56,15 +60,15 @@ max_connections = 10
       ST_AsBinary(lv.lines) AS geom 
     FROM 
       public."live-report-test" lv
-	LEFT JOIN public."traffic-category" ct on lv.category_id = ct.id
+    LEFT JOIN public."traffic-category" ct on lv.category_id = ct.id
     WHERE
-	  lv.lines && !BBOX! 
-	  AND lv.lines IS NOT NULL
-	  AND lv.geom_type = 'NO_ENTRY_ROAD'
-    
-    UNION ALL
-    
-   SELECT 
+      lv.lines && !BBOX! 
+      AND lv.lines IS NOT NULL
+      AND lv.geom_type = 'ROAD_CLOSED'
+   
+   UNION ALL
+   
+    SELECT 
       lv.tegola_id as id, 
       lv.id as live_report_id, 
       ct.name as category_name, 
@@ -78,13 +82,15 @@ max_connections = 10
       ST_AsBinary(lv.points) AS geom 
     FROM 
       public."live-report-test" lv
-	LEFT JOIN public."traffic-category" ct on lv.category_id = ct.id
+    LEFT JOIN public."traffic-category" ct on lv.category_id = ct.id
     WHERE
-	  lv.lines && !BBOX! 
-	  AND lv.lines IS NOT NULL
-	  AND lv.geom_type = 'NO_ENTRY_ROAD'
+      lv.points && !BBOX! 
+      AND lv.points IS NOT NULL
+      AND lv.geom_type = 'ROAD_CLOSED'  
+     
   """
-
+    
+# Live reports map with separate layers
 [[maps]]
 name = "livereports"
 attribution = "© Live Reports"
@@ -92,10 +98,19 @@ bounds = [-180.0, -85.0511, 180.0, 85.0511]
 center = [106.675327, 10.7590847, 14.0]  # Ho Chi Minh City
 
   [[maps.layers]]
-  name = "live_reports"
-  provider_layer = "postgis_provider.live_reports"
+  name = "live_poi"
+  provider_layer = "postgis_provider.live_poi"
   min_zoom = 10
   max_zoom = 22
   
     [maps.layers.default_tags]
-    class = "live_reports"
+    class = "live_poi"
+
+  [[maps.layers]]
+  name = "road_closures"
+  provider_layer = "postgis_provider.road_closures"
+  min_zoom = 10
+  max_zoom = 22
+  
+    [maps.layers.default_tags]
+    class = "road_closures"
